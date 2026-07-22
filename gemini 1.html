@@ -1666,15 +1666,31 @@ async function eliminarEventoEnFirebase(nombreEvento) {
 
     if (Object.keys(updates).length) {
       await firebaseDb.ref("eventos").update(updates);
-      actualizarEstadoFirebase("Evento eliminado de Firebase correctamente.");
-    } else {
-      actualizarEstadoFirebase("No se encontró el evento en Firebase para eliminar.");
     }
   } catch (e) {
     console.error("Error al eliminar el evento en Firebase:", e);
     const detalle = e && e.message ? e.message : "Sin detalle";
     actualizarEstadoFirebase(`No se pudo eliminar el evento de Firebase: ${detalle}`);
     return false;
+  }
+
+  try {
+    const snapshotCompradores = await firebaseDb.ref("compradores").once("value");
+    const dataCompradores = snapshotCompradores.val() || {};
+    const updatesCompradores = {};
+
+    Object.entries(dataCompradores).forEach(([key, item]) => {
+      const evento = item && (item.evento || item.nombreEvento || item.event);
+      if (evento === nombreEvento) {
+        updatesCompradores[key] = null;
+      }
+    });
+
+    if (Object.keys(updatesCompradores).length) {
+      await firebaseDb.ref("compradores").update(updatesCompradores);
+    }
+  } catch (e) {
+    console.error("Error al eliminar compradores asociados al evento en Firebase:", e);
   }
 
   try {
@@ -1691,11 +1707,24 @@ async function eliminarEventoEnFirebase(nombreEvento) {
           fecha: new Date().toISOString()
         })
       });
+
+      await fetch(urlSheets, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          tipo: "comprador",
+          accion: "eliminar",
+          evento: nombreEvento,
+          fecha: new Date().toISOString()
+        })
+      });
     }
   } catch (e) {
-    console.error("Error al eliminar el evento en Google Sheets:", e);
+    console.error("Error al eliminar el evento/compradores en Google Sheets:", e);
   }
 
+  actualizarEstadoFirebase("Evento y compradores eliminados correctamente.");
   return true;
 }
 
