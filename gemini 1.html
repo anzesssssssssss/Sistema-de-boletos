@@ -311,6 +311,12 @@
       <button class="accion" id="btnGuardarFirebase">💾 Guardar configuración</button>
       <p class="ayuda" id="firebaseStatus">Aún no se ha configurado Firebase.</p>
     </div>
+    <div class="tarjeta">
+      <h2>Google Sheets / Apps Script</h2>
+      <p class="ayuda">Si tienes una Web App de Google Apps Script, pega aquí la URL para registrar eventos y compradores también en la hoja.</p>
+      <input type="text" id="inUrlSheets" placeholder="https://script.google.com/macros/s/.../exec">
+      <button class="accion" id="btnGuardarSheets">💾 Guardar URL</button>
+    </div>
         <div class="tarjeta">
       <h2>Respaldo de datos</h2>
       <p class="ayuda">
@@ -1440,6 +1446,7 @@ var QRCodeLib = (() => {
 const CLAVE_DB = "entradas_db_v1";
 const CLAVE_EVENTOS = "eventos_config_v1";
 const CLAVE_FIREBASE_CONFIG = "firebase_config_v1";
+const CLAVE_SHEETS = "entradas_sheets_url";
 const FIREBASE_CONFIG_DEFECTO = {
   apiKey: "AIzaSyCslXuIku8Eoq1klg_4OOKa23GKORssYrQ",
   authDomain: "boletos-c498f.firebaseapp.com",
@@ -1455,6 +1462,15 @@ let eventos = cargarEventos();
 let firebaseDb = null;
 let firebaseReady = false;
 let eventosListenerAttached = false;
+
+function getUrlSheets() {
+  try {
+    const url = localStorage.getItem(CLAVE_SHEETS);
+    return url && url.startsWith("http") ? url : "";
+  } catch (e) {
+    return "";
+  }
+}
 
 function parseFirebaseConfig(raw) {
   if (!raw) return null;
@@ -1604,13 +1620,33 @@ async function registrarEventoEnFirebase(nombreEvento) {
   try {
     await firebaseDb.ref("eventos").push({ nombre: nombreEvento, fecha: new Date().toISOString() });
     actualizarEstadoFirebase("Evento enviado a Firebase correctamente.");
-    return true;
   } catch (e) {
     console.error("Error al registrar evento en Firebase:", e);
     const detalle = e && e.message ? e.message : "Sin detalle";
     actualizarEstadoFirebase(`No se pudo enviar el evento a Firebase: ${detalle}`);
     return false;
   }
+
+  try {
+    const urlSheets = getUrlSheets();
+    if (urlSheets) {
+      await fetch(urlSheets, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          tipo: "evento",
+          accion: "agregar",
+          evento: nombreEvento,
+          fecha: new Date().toISOString()
+        })
+      });
+    }
+  } catch (e) {
+    console.error("Error al enviar el evento a Google Sheets:", e);
+  }
+
+  return true;
 }
 
 function fusionarEventos(remotos) {
@@ -1835,21 +1871,41 @@ document.getElementById("btnPegar").addEventListener("click", () => {
   renderPendientes();
 });
 
-// ---------- Función para enviar registro a Firebase ----------
+// ---------- Función para enviar registro a Firebase y Google Sheets ----------
 async function registrarEnGoogleSheets(evento, compradores) {
-  if (!(await inicializarFirebase())) return;
+  if (firebaseReady && firebaseDb) {
+    try {
+      await firebaseDb.ref("compradores").push({
+        fecha: new Date().toISOString(),
+        evento,
+        compradores
+      });
+      actualizarEstadoFirebase("Compradores enviados a Firebase correctamente.");
+    } catch (e) {
+      console.error("Error al registrar compradores en Firebase:", e);
+      const detalle = e && e.message ? e.message : "Sin detalle";
+      actualizarEstadoFirebase(`No se pudieron guardar los compradores en Firebase: ${detalle}`);
+    }
+  }
 
   try {
-    await firebaseDb.ref("compradores").push({
-      fecha: new Date().toISOString(),
-      evento,
-      compradores
-    });
-    actualizarEstadoFirebase("Compradores enviados a Firebase correctamente.");
+    const urlSheets = getUrlSheets();
+    if (urlSheets) {
+      await fetch(urlSheets, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          tipo: "comprador",
+          accion: "agregar",
+          fecha: new Date().toISOString(),
+          evento,
+          compradores
+        })
+      });
+    }
   } catch (e) {
-    console.error("Error al registrar compradores en Firebase:", e);
-    const detalle = e && e.message ? e.message : "Sin detalle";
-    actualizarEstadoFirebase(`No se pudieron guardar los compradores en Firebase: ${detalle}`);
+    console.error("Error al registrar compradores en Google Sheets:", e);
   }
 }
 
@@ -2062,6 +2118,13 @@ function aplicarConfiguracionFirebase() {
   actualizarEstadoFirebase();
 }
 
+function aplicarUrlSheets() {
+  const input = document.getElementById("inUrlSheets");
+  if (input) {
+    input.value = getUrlSheets();
+  }
+}
+
 function conectarFirebaseAutomaticamente() {
   const config = getFirebaseConfig();
   if (!config || !config.projectId || config.projectId === "TU_PROJECT") {
@@ -2095,7 +2158,21 @@ if (document.getElementById("btnGuardarFirebase")) {
   });
 }
 
+if (document.getElementById("btnGuardarSheets")) {
+  document.getElementById("btnGuardarSheets").addEventListener("click", () => {
+    const url = document.getElementById("inUrlSheets").value.trim();
+    if (url && !url.startsWith("http")) {
+      alert("La URL de Google Sheets debe comenzar con http o https.");
+      return;
+    }
+    localStorage.setItem(CLAVE_SHEETS, url);
+    aplicarUrlSheets();
+    alert("URL de Google Sheets guardada.");
+  });
+}
+
 aplicarConfiguracionFirebase();
+aplicarUrlSheets();
 
 function renderListado(filtro = "") {
   const tbody = document.querySelector("#tablaListado tbody");
