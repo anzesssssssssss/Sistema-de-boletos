@@ -1441,27 +1441,61 @@ const CLAVE_DB = "entradas_db_v1";
 const CLAVE_EVENTOS = "eventos_config_v1";
 const CLAVE_FIREBASE_CONFIG = "firebase_config_v1";
 const FIREBASE_CONFIG_DEFECTO = {
-  apiKey: "TU_API_KEY",
-  authDomain: "TU_PROJECT.firebaseapp.com",
-  databaseURL: "https://TU_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "TU_PROJECT",
-  storageBucket: "TU_PROJECT.appspot.com",
-  messagingSenderId: "000000000000",
-  appId: "1:000000000000:web:000000000000"
+  apiKey: "AIzaSyCslXuIku8Eoq1klg_4OOKa23GKORssYrQ",
+  authDomain: "boletos-c498f.firebaseapp.com",
+  databaseURL: "https://boletos-c498f-default-rtdb.firebaseio.com",
+  projectId: "boletos-c498f",
+  storageBucket: "boletos-c498f.firebasestorage.app",
+  messagingSenderId: "786528602086",
+  appId: "1:786528602086:web:e479e64283b73d28693827",
+  measurementId: "G-Q0Q6V9CGYE"
 };
 let db = cargarDB();
 let eventos = cargarEventos();
 let firebaseDb = null;
 let firebaseReady = false;
+let eventosListenerAttached = false;
+
+function parseFirebaseConfig(raw) {
+  if (!raw) return null;
+  if (raw && typeof raw === "object") return raw;
+
+  const texto = String(raw).trim();
+  if (!texto) return null;
+
+  try {
+    const textoLimpio = texto
+      .replace(/^\s*(const|let|var)\s+[A-Za-z0-9_$]+\s*=\s*/, "")
+      .replace(/;\s*$/, "")
+      .trim();
+    const parsed = JSON.parse(textoLimpio);
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch (e) {}
+
+  try {
+    const textoLimpio = texto
+      .replace(/^\s*(const|let|var)\s+[A-Za-z0-9_$]+\s*=\s*/, "")
+      .replace(/;\s*$/, "")
+      .trim();
+    const parsed = Function(`return (${textoLimpio});`)();
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch (e) {}
+
+  return null;
+}
 
 function getFirebaseConfig() {
-  try {
-    const guardada = localStorage.getItem(CLAVE_FIREBASE_CONFIG);
-    if (guardada) {
-      const parsed = JSON.parse(guardada);
-      if (parsed && parsed.projectId && parsed.projectId !== "TU_PROJECT") return parsed;
-    }
-  } catch (e) {}
+  const guardada = localStorage.getItem(CLAVE_FIREBASE_CONFIG);
+  const parsedGuardada = parseFirebaseConfig(guardada);
+  if (parsedGuardada && parsedGuardada.projectId && parsedGuardada.projectId !== "TU_PROJECT") {
+    return parsedGuardada;
+  }
+
+  const parsedDefecto = parseFirebaseConfig(FIREBASE_CONFIG_DEFECTO);
+  if (parsedDefecto && parsedDefecto.projectId && parsedDefecto.projectId !== "TU_PROJECT") {
+    return parsedDefecto;
+  }
+
   return FIREBASE_CONFIG_DEFECTO;
 }
 
@@ -1470,15 +1504,13 @@ function actualizarEstadoFirebase(mensaje = "") {
   if (!estado) return;
   estado.textContent = mensaje || (firebaseReady
     ? "Firebase listo para sincronizar eventos y compradores."
-    : "Aún no se ha configurado Firebase con un projectId válido.");
+    : "Firebase está listo con la configuración por defecto del proyecto.");
+  estado.style.color = firebaseReady ? "#dcfce7" : "#fef3c7";
 }
 
 function normalizarEventos(lista) {
   return Array.isArray(lista)
-    ? lista
-        .map(e => String(e).trim())
-        .filter(Boolean)
-        .filter((e, index, self) => self.indexOf(e) === index)
+    ? lista.map(e => String(e).trim()).filter(Boolean).filter((e, index, self) => self.indexOf(e) === index)
     : [];
 }
 
@@ -1493,12 +1525,6 @@ function cargarEventos() {
   } catch (e) { return []; }
 }
 function guardarEventos() { localStorage.setItem(CLAVE_EVENTOS, JSON.stringify(eventos)); }
-
-function normalizarEventos(lista) {
-  return Array.isArray(lista)
-    ? lista.map(e => String(e).trim()).filter(Boolean).filter((e, index, self) => self.indexOf(e) === index)
-    : [];
-}
 
 async function inicializarFirebase() {
   if (firebaseReady && firebaseDb) return true;
@@ -1517,16 +1543,39 @@ async function inicializarFirebase() {
     firebaseDb = firebase.database();
     firebaseReady = true;
     actualizarEstadoFirebase("Firebase listo para sincronizar eventos y compradores.");
+    escucharEventosFirebase();
     return true;
   } catch (e) {
     console.error("Error al inicializar Firebase:", e);
-    actualizarEstadoFirebase("No fue posible conectar con Firebase. Revisa la configuración y la Realtime Database.");
+    const detalle = e && e.message ? e.message : "Sin detalle";
+    actualizarEstadoFirebase(`No fue posible conectar con Firebase: ${detalle}`);
     return false;
   }
 }
 
+function escucharEventosFirebase() {
+  if (!firebaseDb || eventosListenerAttached) return;
+
+  eventosListenerAttached = true;
+  firebaseDb.ref("eventos").on("value", (snapshot) => {
+    const data = snapshot.val() || {};
+    const remotos = Object.values(data)
+      .map(item => typeof item === "string" ? item : item.nombre || item.evento || item.value)
+      .filter(Boolean);
+
+    const combinados = normalizarEventos([...eventos, ...remotos]);
+    if (combinados.length !== eventos.length || combinados.some((e, i) => e !== eventos[i])) {
+      eventos = combinados;
+      guardarEventos();
+      renderSelectEventos();
+      renderEventosConfig();
+    }
+  });
+}
+
 async function sincronizarEventosDesdeFirebase() {
   if (!(await inicializarFirebase())) return;
+  escucharEventosFirebase();
   try {
     const snapshot = await firebaseDb.ref("eventos").once("value");
     const data = snapshot.val() || {};
@@ -1545,7 +1594,8 @@ async function sincronizarEventosDesdeFirebase() {
     }
   } catch (e) {
     console.error("Error al cargar eventos desde Firebase:", e);
-    actualizarEstadoFirebase("Firebase respondió, pero no fue posible leer los eventos. Revisa reglas y la Realtime Database.");
+    const detalle = e && e.message ? e.message : "Sin detalle";
+    actualizarEstadoFirebase(`Firebase respondió, pero no fue posible leer los eventos: ${detalle}`);
   }
 }
 
@@ -1557,7 +1607,8 @@ async function registrarEventoEnFirebase(nombreEvento) {
     return true;
   } catch (e) {
     console.error("Error al registrar evento en Firebase:", e);
-    actualizarEstadoFirebase("No se pudo enviar el evento a Firebase. Revisa permisos y reglas de Realtime Database.");
+    const detalle = e && e.message ? e.message : "Sin detalle";
+    actualizarEstadoFirebase(`No se pudo enviar el evento a Firebase: ${detalle}`);
     return false;
   }
 }
@@ -1732,7 +1783,8 @@ document.getElementById("btnAgregarEvento").addEventListener("click", async () =
 
 renderSelectEventos();
 renderEventosConfig();
-inicializarFirebase().then(() => sincronizarEventosDesdeFirebase());
+aplicarConfiguracionFirebase();
+conectarFirebaseAutomaticamente();
 
 // ---------- Agregar Compradores ----------
 let pendientes = [];
@@ -1796,7 +1848,8 @@ async function registrarEnGoogleSheets(evento, compradores) {
     actualizarEstadoFirebase("Compradores enviados a Firebase correctamente.");
   } catch (e) {
     console.error("Error al registrar compradores en Firebase:", e);
-    actualizarEstadoFirebase("No se pudieron guardar los compradores en Firebase. Revisa permisos y reglas de Realtime Database.");
+    const detalle = e && e.message ? e.message : "Sin detalle";
+    actualizarEstadoFirebase(`No se pudieron guardar los compradores en Firebase: ${detalle}`);
   }
 }
 
@@ -2009,26 +2062,36 @@ function aplicarConfiguracionFirebase() {
   actualizarEstadoFirebase();
 }
 
+function conectarFirebaseAutomaticamente() {
+  const config = getFirebaseConfig();
+  if (!config || !config.projectId || config.projectId === "TU_PROJECT") {
+    actualizarEstadoFirebase("Aún no se ha configurado Firebase con un projectId válido.");
+    return;
+  }
+
+  localStorage.setItem(CLAVE_FIREBASE_CONFIG, JSON.stringify(config));
+  firebaseDb = null;
+  firebaseReady = false;
+  eventosListenerAttached = false;
+  inicializarFirebase().then(() => sincronizarEventosDesdeFirebase());
+}
+
 if (document.getElementById("btnGuardarFirebase")) {
   document.getElementById("btnGuardarFirebase").addEventListener("click", () => {
     const texto = document.getElementById("firebaseConfigJson").value.trim();
-    if (!texto) {
-      alert("Pega el JSON de configuración de Firebase antes de guardar.");
+    const config = parseFirebaseConfig(texto);
+
+    if (!config || !config.projectId) {
+      alert("No se pudo leer la configuración. Pega el bloque de Firebase tal como aparece en la consola.");
       return;
     }
-    try {
-      const config = JSON.parse(texto);
-      if (!config.projectId) {
-        throw new Error("Falta projectId");
-      }
-      localStorage.setItem(CLAVE_FIREBASE_CONFIG, JSON.stringify(config));
-      firebaseDb = null;
-      firebaseReady = false;
-      inicializarFirebase().then(() => sincronizarEventosDesdeFirebase());
-      alert("Configuración de Firebase guardada. La app se conectará automáticamente.");
-    } catch (e) {
-      alert("El JSON de Firebase es inválido. Revisa apiKey, authDomain, projectId y databaseURL.");
-    }
+
+    localStorage.setItem(CLAVE_FIREBASE_CONFIG, JSON.stringify(config));
+    firebaseDb = null;
+    firebaseReady = false;
+    eventosListenerAttached = false;
+    inicializarFirebase().then(() => sincronizarEventosDesdeFirebase());
+    alert("Configuración de Firebase guardada. La app se conectará automáticamente.");
   });
 }
 
