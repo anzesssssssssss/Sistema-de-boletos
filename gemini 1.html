@@ -1650,47 +1650,48 @@ async function registrarEventoEnFirebase(nombreEvento) {
 }
 
 async function eliminarEventoEnFirebase(nombreEvento) {
-  if (!(await inicializarFirebase())) return false;
+  const firebaseDisponible = await inicializarFirebase();
 
-  try {
-    const snapshot = await firebaseDb.ref("eventos").once("value");
-    const data = snapshot.val() || {};
-    const updates = {};
+  if (firebaseDisponible) {
+    try {
+      const snapshot = await firebaseDb.ref("eventos").once("value");
+      const data = snapshot.val() || {};
+      const updates = {};
 
-    Object.entries(data).forEach(([key, item]) => {
-      const nombre = typeof item === "string" ? item : item && (item.nombre || item.evento || item.value);
-      if (nombre === nombreEvento) {
-        updates[key] = null;
+      Object.entries(data).forEach(([key, item]) => {
+        const nombre = typeof item === "string" ? item : item && (item.nombre || item.evento || item.value);
+        if (nombre === nombreEvento) {
+          updates[key] = null;
+        }
+      });
+
+      if (Object.keys(updates).length) {
+        await firebaseDb.ref("eventos").update(updates);
       }
-    });
-
-    if (Object.keys(updates).length) {
-      await firebaseDb.ref("eventos").update(updates);
+    } catch (e) {
+      console.error("Error al eliminar el evento en Firebase:", e);
+      const detalle = e && e.message ? e.message : "Sin detalle";
+      actualizarEstadoFirebase(`No se pudo eliminar el evento de Firebase: ${detalle}`);
     }
-  } catch (e) {
-    console.error("Error al eliminar el evento en Firebase:", e);
-    const detalle = e && e.message ? e.message : "Sin detalle";
-    actualizarEstadoFirebase(`No se pudo eliminar el evento de Firebase: ${detalle}`);
-    return false;
-  }
 
-  try {
-    const snapshotCompradores = await firebaseDb.ref("compradores").once("value");
-    const dataCompradores = snapshotCompradores.val() || {};
-    const updatesCompradores = {};
+    try {
+      const snapshotCompradores = await firebaseDb.ref("compradores").once("value");
+      const dataCompradores = snapshotCompradores.val() || {};
+      const updatesCompradores = {};
 
-    Object.entries(dataCompradores).forEach(([key, item]) => {
-      const evento = item && (item.evento || item.nombreEvento || item.event);
-      if (evento === nombreEvento) {
-        updatesCompradores[key] = null;
+      Object.entries(dataCompradores).forEach(([key, item]) => {
+        const evento = item && (item.evento || item.nombreEvento || item.event);
+        if (evento === nombreEvento) {
+          updatesCompradores[key] = null;
+        }
+      });
+
+      if (Object.keys(updatesCompradores).length) {
+        await firebaseDb.ref("compradores").update(updatesCompradores);
       }
-    });
-
-    if (Object.keys(updatesCompradores).length) {
-      await firebaseDb.ref("compradores").update(updatesCompradores);
+    } catch (e) {
+      console.error("Error al eliminar compradores asociados al evento en Firebase:", e);
     }
-  } catch (e) {
-    console.error("Error al eliminar compradores asociados al evento en Firebase:", e);
   }
 
   try {
@@ -1724,7 +1725,14 @@ async function eliminarEventoEnFirebase(nombreEvento) {
     console.error("Error al eliminar el evento/compradores en Google Sheets:", e);
   }
 
-  actualizarEstadoFirebase("Evento y compradores eliminados correctamente.");
+  const boletosAntes = db.length;
+  db = db.filter(t => t.evento !== nombreEvento);
+  if (db.length !== boletosAntes) {
+    guardarDB();
+    renderListado();
+  }
+
+  actualizarEstadoFirebase("Evento, compradores y boletos eliminados correctamente.");
   return true;
 }
 
