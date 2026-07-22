@@ -1649,6 +1649,56 @@ async function registrarEventoEnFirebase(nombreEvento) {
   return true;
 }
 
+async function eliminarEventoEnFirebase(nombreEvento) {
+  if (!(await inicializarFirebase())) return false;
+
+  try {
+    const snapshot = await firebaseDb.ref("eventos").once("value");
+    const data = snapshot.val() || {};
+    const updates = {};
+
+    Object.entries(data).forEach(([key, item]) => {
+      const nombre = typeof item === "string" ? item : item && (item.nombre || item.evento || item.value);
+      if (nombre === nombreEvento) {
+        updates[key] = null;
+      }
+    });
+
+    if (Object.keys(updates).length) {
+      await firebaseDb.ref("eventos").update(updates);
+      actualizarEstadoFirebase("Evento eliminado de Firebase correctamente.");
+    } else {
+      actualizarEstadoFirebase("No se encontró el evento en Firebase para eliminar.");
+    }
+  } catch (e) {
+    console.error("Error al eliminar el evento en Firebase:", e);
+    const detalle = e && e.message ? e.message : "Sin detalle";
+    actualizarEstadoFirebase(`No se pudo eliminar el evento de Firebase: ${detalle}`);
+    return false;
+  }
+
+  try {
+    const urlSheets = getUrlSheets();
+    if (urlSheets) {
+      await fetch(urlSheets, {
+        method: "POST",
+        mode: "no-cors",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          tipo: "evento",
+          accion: "eliminar",
+          evento: nombreEvento,
+          fecha: new Date().toISOString()
+        })
+      });
+    }
+  } catch (e) {
+    console.error("Error al eliminar el evento en Google Sheets:", e);
+  }
+
+  return true;
+}
+
 function fusionarEventos(remotos) {
   const combinados = normalizarEventos([...eventos, ...remotos]);
   if (combinados.length !== eventos.length || combinados.some((e, i) => e !== eventos[i])) {
@@ -1777,8 +1827,12 @@ function renderEventosConfig() {
   });
 
   tbody.querySelectorAll("button").forEach(btn => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const index = Number(btn.dataset.i);
+      const nombreEvento = eventos[index];
+      if (!nombreEvento) return;
+
+      await eliminarEventoEnFirebase(nombreEvento);
       eventos.splice(index, 1);
       guardarEventos();
       renderSelectEventos();
