@@ -1447,6 +1447,7 @@ const CLAVE_DB = "entradas_db_v1";
 const CLAVE_EVENTOS = "eventos_config_v1";
 const CLAVE_FIREBASE_CONFIG = "firebase_config_v1";
 const CLAVE_SHEETS = "entradas_sheets_url";
+const URL_SHEETS_DEFECTO = "https://script.google.com/macros/s/AKfycbx2zKIy5HH4kaLN9Rl2_FBs0MMcUcEVvJhzpkJaRjcAnY9hy15KMscpyq_iv9VlVAIU/exec";
 const FIREBASE_CONFIG_DEFECTO = {
 apiKey: "AIzaSyCslXuIku8Eoq1klg_4OOKa23GKORssYrQ",
 authDomain: "boletos-c498f.firebaseapp.com",
@@ -1464,12 +1465,22 @@ let firebaseReady = false;
 let eventosListenerAttached = false;
 
 function getUrlSheets() {
-try {
-const url = localStorage.getItem(CLAVE_SHEETS);
-return url && url.startsWith("http") ? url : "";
-} catch (e) {
-return "";
+  try {
+    const url = localStorage.getItem(CLAVE_SHEETS);
+    return url && url.startsWith("http") ? url : URL_SHEETS_DEFECTO;
+  } catch (e) {
+    return URL_SHEETS_DEFECTO;
+  }
 }
+
+function inicializarUrlSheets() {
+  try {
+    if (!localStorage.getItem(CLAVE_SHEETS)) {
+      localStorage.setItem(CLAVE_SHEETS, URL_SHEETS_DEFECTO);
+    }
+  } catch (e) {
+    console.warn("No se pudo inicializar la URL de Google Sheets:", e);
+  }
 }
 
 function parseFirebaseConfig(raw) {
@@ -1570,49 +1581,47 @@ return false;
 }
 
 function escucharEventosFirebase() {
-if (!firebaseDb || eventosListenerAttached) return;
+  if (!firebaseDb || eventosListenerAttached) return;
 
-eventosListenerAttached = true;
-firebaseDb.ref("eventos").on("value", (snapshot) => {
-const data = snapshot.val() || {};
-const remotos = Object.values(data)
-.map(item => typeof item === "string" ? item : item.nombre || item.evento || item.value)
-.filter(Boolean);
+  eventosListenerAttached = true;
+  firebaseDb.ref("eventos").on("value", (snapshot) => {
+    const data = snapshot.val() || {};
+    const remotos = normalizarEventos(Object.values(data)
+      .map(item => typeof item === "string" ? item : item.nombre || item.evento || item.value)
+      .filter(Boolean));
 
-const combinados = normalizarEventos([...eventos, ...remotos]);
-if (combinados.length !== eventos.length || combinados.some((e, i) => e !== eventos[i])) {
-eventos = combinados;
-guardarEventos();
-renderSelectEventos();
-renderEventosConfig();
-}
-});
+    if (remotos.length !== eventos.length || remotos.some((e, i) => e !== eventos[i])) {
+      eventos = remotos;
+      guardarEventos();
+      renderSelectEventos();
+      renderEventosConfig();
+    }
+  });
 }
 
 async function sincronizarEventosDesdeFirebase() {
-if (!(await inicializarFirebase())) return;
-escucharEventosFirebase();
-try {
-const snapshot = await firebaseDb.ref("eventos").once("value");
-const data = snapshot.val() || {};
-const remotos = Object.values(data)
-.map(item => typeof item === "string" ? item : item.nombre || item.evento || item.value)
-.filter(Boolean);
+  if (!(await inicializarFirebase())) return;
+  escucharEventosFirebase();
+  try {
+    const snapshot = await firebaseDb.ref("eventos").once("value");
+    const data = snapshot.val() || {};
+    const remotos = normalizarEventos(Object.values(data)
+      .map(item => typeof item === "string" ? item : item.nombre || item.evento || item.value)
+      .filter(Boolean));
 
-if (remotos.length) {
-const combinados = normalizarEventos([...eventos, ...remotos]);
-if (combinados.length !== eventos.length || combinados.some((e, i) => e !== eventos[i])) {
-eventos = combinados;
-guardarEventos();
-renderSelectEventos();
-renderEventosConfig();
-}
-}
-} catch (e) {
-console.error("Error al cargar eventos desde Firebase:", e);
-const detalle = e && e.message ? e.message : "Sin detalle";
-actualizarEstadoFirebase(`Firebase respondió, pero no fue posible leer los eventos: ${detalle}`);
-}
+    if (remotos.length || eventos.length) {
+      if (remotos.length !== eventos.length || remotos.some((e, i) => e !== eventos[i])) {
+        eventos = remotos;
+        guardarEventos();
+        renderSelectEventos();
+        renderEventosConfig();
+      }
+    }
+  } catch (e) {
+    console.error("Error al cargar eventos desde Firebase:", e);
+    const detalle = e && e.message ? e.message : "Sin detalle";
+    actualizarEstadoFirebase(`Firebase respondió, pero no fue posible leer los eventos: ${detalle}`);
+  }
 }
 
 async function registrarEventoEnFirebase(nombreEvento) {
@@ -1737,13 +1746,13 @@ return true;
 }
 
 function fusionarEventos(remotos) {
-const combinados = normalizarEventos([...eventos, ...remotos]);
-if (combinados.length !== eventos.length || combinados.some((e, i) => e !== eventos[i])) {
-eventos = combinados;
-guardarEventos();
-renderSelectEventos();
-renderEventosConfig();
-}
+  const remotosNormalizados = normalizarEventos(remotos);
+  if (remotosNormalizados.length !== eventos.length || remotosNormalizados.some((e, i) => e !== eventos[i])) {
+    eventos = remotosNormalizados;
+    guardarEventos();
+    renderSelectEventos();
+    renderEventosConfig();
+  }
 }
 
 function extraerEventosDesdeRespuesta(datos) {
@@ -2263,6 +2272,7 @@ alert("URL de Google Sheets guardada.");
 }
 
 aplicarConfiguracionFirebase();
+inicializarUrlSheets();
 aplicarUrlSheets();
 
 function renderListado(filtro = "") {
