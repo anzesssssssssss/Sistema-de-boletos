@@ -1535,6 +1535,31 @@ estado.textContent = mensaje || (firebaseReady
 estado.style.color = firebaseReady ? "#dcfce7" : "#fef3c7";
 }
 
+function construirPayloadSheets({ tipo, accion, evento, fecha, compradores = [], nombre = "", cantidad = 0 }) {
+const compradoresNormalizados = Array.isArray(compradores) ? compradores : [];
+const compradorPrincipal = compradoresNormalizados[0] || {};
+const nombreComprador = String(compradorPrincipal.nombre || nombre || "").trim();
+const cantidadBoletos = Number(compradorPrincipal.cantidad || cantidad || 0);
+
+return {
+tipo,
+accion,
+fecha: fecha || new Date().toISOString(),
+evento: String(evento || "").trim(),
+compradores: compradoresNormalizados,
+nombre: nombreComprador,
+comprador: nombreComprador,
+nombreComprador,
+buyerName: nombreComprador,
+cantidad: cantidadBoletos,
+boleto: cantidadBoletos,
+boletos: cantidadBoletos,
+total: cantidadBoletos,
+cantidadBoletos,
+compradorCantidad: cantidadBoletos
+};
+}
+
 function normalizarEventos(lista) {
 return Array.isArray(lista)
 ? lista.map(e => String(e).trim()).filter(Boolean).filter((e, index, self) => self.indexOf(e) === index)
@@ -1639,16 +1664,20 @@ return false;
 try {
 const urlSheets = getUrlSheets();
 if (urlSheets) {
+const payload = construirPayloadSheets({
+tipo: "evento",
+action: "agregar",
+evento: nombreEvento,
+fecha: new Date().toISOString(),
+compradores: [],
+nombre: "",
+cantidad: 0
+});
 await fetch(urlSheets, {
 method: "POST",
 mode: "no-cors",
 headers: { "Content-Type": "text/plain;charset=utf-8" },
-body: JSON.stringify({
-tipo: "evento",
-accion: "agregar",
-evento: nombreEvento,
-fecha: new Date().toISOString()
-})
+body: JSON.stringify(payload)
 });
 }
 } catch (e) {
@@ -1991,17 +2020,20 @@ actualizarEstadoFirebase(`No se pudieron guardar los compradores en Firebase: ${
 try {
 const urlSheets = getUrlSheets();
 if (urlSheets) {
+const payload = construirPayloadSheets({
+tipo: "comprador",
+action: "agregar",
+evento,
+fecha: new Date().toISOString(),
+compradores,
+nombre: compradores[0]?.nombre || "",
+cantidad: compradores[0]?.cantidad || 0
+});
 await fetch(urlSheets, {
 method: "POST",
 mode: "no-cors",
 headers: { "Content-Type": "text/plain;charset=utf-8" },
-body: JSON.stringify({
-tipo: "comprador",
-accion: "agregar",
-fecha: new Date().toISOString(),
-evento,
-compradores
-})
+body: JSON.stringify(payload)
 });
 }
 } catch (e) {
